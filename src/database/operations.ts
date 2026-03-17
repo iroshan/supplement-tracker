@@ -137,6 +137,14 @@ export function todayDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
+export function isSupplementActiveOnDay(dayRestriction: string | null, date: string): boolean {
+  if (!dayRestriction) return true;
+  const d = new Date(date + 'T00:00:00');
+  const dayOfWeek = d.getDay(); // 0=Sun, 1=Mon, ...
+  const allowedDays = dayRestriction.split(',').map(Number);
+  return allowedDays.includes(dayOfWeek);
+}
+
 export async function ensureDailyLogs(date: string): Promise<void> {
   const database = await getDb();
   const supplements = await getAllSupplements();
@@ -240,4 +248,162 @@ export async function importAllData(jsonString: string): Promise<void> {
     await database.execAsync('ROLLBACK');
     throw err;
   }
+}
+
+// ─── Analytics ──────────────────────────────────────────────────────────────
+
+export type DaySummary = {
+  date: string;
+  takenCount: number;
+  expectedCount: number;
+};
+
+export async function getMonthlySummary(yearMonth: string): Promise<DaySummary[]> {
+  // yearMonth format: "YYYY-MM"
+  const database = await getDb();
+  const supplements = await getAllSupplements();
+  
+  // Get all logs for this month
+  const logs = await database.getAllAsync<{ date: string, taken: number, supplement_id: number }>(
+    `SELECT date, taken, supplement_id FROM daily_logs WHERE date LIKE ?`,
+    [`${yearMonth}%`]
+  );
+
+  // Group logs by date
+  const logsByDate: Record<string, { taken: number, id: number }[]> = {};
+  logs.forEach(l => {
+    if (!logsByDate[l.date]) logsByDate[l.date] = [];
+    logsByDate[l.date].push({ taken: l.taken, id: l.supplement_id });
+  });
+
+  // Calculate expected vs taken for each day of the month
+  const [year, month] = yearMonth.split('-').map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const summary: DaySummary[] = [];
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${yearMonth}-${String(d).padStart(2, '0')}`;
+    const dayLogs = logsByDate[dateStr] || [];
+    
+    let expectedCount = 0;
+    let takenCount = 0;
+
+    for (const s of supplements) {
+      if (isSupplementActiveOnDay(s.day_restriction, dateStr)) {
+        expectedCount++;
+        const log = dayLogs.find(l => l.id === s.id);
+        if (log && log.taken === 1) {
+          takenCount++;
+        }
+      }
+    }
+
+    summary.push({ date: dateStr, takenCount, expectedCount });
+  }
+
+  return summary;
+}
+
+export async function getAdherenceStats(): Promise<{
+  currentStreak: number;
+  bestStreak: number;
+  thirtyDayAdherence: number;
+}> {
+  const database = await getDb();
+  const supplements = await getAllSupplements();
+  
+  // Get all logs from the beginning
+  const logs = await database.getAllAsync<{ date: string, taken: number, supplement_id: number }>(
+    `SELECT date, taken, supplement_id FROM daily_logs ORDER BY date DESC`
+  );
+
+  const logsByDate: Record<string, { taken: number, id: number }[]> = {};
+  logs.forEach(l => {
+    if (!logsByDate[l.date]) logsByDate[l.date] = [];
+    logsByDate[l.date].push({ taken: l.taken, id: l.supplement_id });
+  });
+
+  const uniqueDates = Array.from(new Set(logs.map(l => l.date))).sort().reverse();
+  const today = todayDateString();
+  
+  let currentStreak = 0;
+  let bestStreak = 0;
+  let tempStreak = 0;
+
+  // Function to check if a day was "successful" (e.g. at least 80% completion or 100%)
+  // Let's go with 100% for the strict streak, or "at least one taken" for a lenient one.
+  // User asked for "usage tracker", so maybe "any usage" is a streak.
+  // But "Protocol adherence" is better. Let's say > 50% completion is a streak day.
+  const isSuccessfulDay = (date: string) => {
+    const dayLogs = logsByDate[date] || [];
+    let expected = 0;
+    let taken = 0;
+    for (const s of supplements) {
+      if (isSupplementActiveOnDay(s.day_restriction, date)) {
+        expected++;
+        if (dayLogs.find(l => l.id === s.id && l.taken === 1)) taken++;
+      }
+    }
+    return expected > 0 && taken === expected; // Strict: 100% completion
+  };
+
+  // Calculate Best Streak
+  let allDates = [...uniqueDates].sort();
+  let bStreak = 0;
+  let tStreak = 0;
+  
+  // We need a continuous range of dates. 
+  // Let's simplify: only count dates that have logs.
+  uniqueDates.forEach((date, index) => {
+    if (isSuccessfulDay(date)) {
+      tStreak++;
+      if (tStreak > bStreak) bStreak = tStreak;
+    } else {
+      tStreak = 0;
+    }
+  });
+  bestStreak = bStreak;
+
+  // Calculate Current Streak (starting from today or yesterday)
+  let checkDate = new Date();
+  let streakCount = 0;
+  
+  while (true) {
+    const dStr = checkDate.toISOString().split('T')[0];
+    if (isSuccessfulDay(dStr)) {
+      streakCount++;
+      checkDate.setDate(checkDate.getDate() - 1);
+    } else {
+      // If today is not successful yet, check yesterday to continue streak
+      if (dStr === today) {
+        checkDate.setDate(checkDate.getDate() - 1);
+        continue;
+      }
+      break;
+    }
+    if (streakCount > 365) break; // safety
+  }
+  currentStreak = streakCount;
+
+  // 30-day adherence
+  let thirtyDayTaken = 0;
+  let thirtyDayExpected = 0;
+  for (let i = 0; i < 30; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dStr = d.toISOString().split('T')[0];
+    const dayLogs = logsByDate[dStr] || [];
+    for (const s of supplements) {
+      if (isSupplementActiveOnDay(s.day_restriction, dStr)) {
+        thirtyDayExpected++;
+        if (dayLogs.find(l => l.id === s.id && l.taken === 1)) thirtyDayTaken++;
+      }
+    }
+  }
+  
+  const thirtyDayAdherence = thirtyDayExpected > 0 
+    ? Math.round((thirtyDayTaken / thirtyDayExpected) * 100) 
+    : 0;
+
+  return { currentStreak, bestStreak, thirtyDayAdherence };
 }

@@ -5,6 +5,7 @@ import { View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import TodayScreen from '../screens/TodayScreen';
+import HistoryScreen from '../screens/HistoryScreen';
 import ProtocolScreen from '../screens/ProtocolScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 
@@ -24,6 +25,8 @@ export default function AppNavigator() {
             let iconName: keyof typeof Ionicons.glyphMap;
             if (route.name === 'Today') {
               iconName = focused ? 'checkmark-circle' : 'checkmark-circle-outline';
+            } else if (route.name === 'History') {
+              iconName = focused ? 'stats-chart' : 'stats-chart-outline';
             } else if (route.name === 'Protocol') {
               iconName = focused ? 'list' : 'list-outline';
             } else {
@@ -38,6 +41,7 @@ export default function AppNavigator() {
         })}
       >
         <Tab.Screen name="Today" component={TodayScreen} />
+        <Tab.Screen name="History" component={HistoryScreen} />
         <Tab.Screen name="Protocol" component={ProtocolScreen} />
         <Tab.Screen name="Settings" component={SettingsScreen} />
       </Tab.Navigator>
