@@ -50,9 +50,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderTopColor: Colors.border,
     borderTopWidth: 1,
-    height: 68,
+    paddingTop: 8,
     paddingBottom: 8,
-    paddingTop: 6,
     elevation: 0,
   },
   tabLabel: {

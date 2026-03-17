@@ -12,6 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
 import { TIME_GROUPS, TIME_GROUP_SUBTITLES, Supplement } from '../database/schema';
 import { addSupplement, updateSupplement } from '../database/operations';
@@ -28,6 +29,7 @@ export default function AddEditModal({ visible, supplement, onClose }: Props) {
   const [timeGroup, setTimeGroup] = useState<string>(TIME_GROUPS[0]);
   const [dayRestriction, setDayRestriction] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (supplement) {
@@ -67,10 +69,11 @@ export default function AddEditModal({ visible, supplement, onClose }: Props) {
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 14) }]}>
           <TouchableOpacity onPress={onClose} style={styles.cancelBtn}>
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
@@ -86,7 +89,12 @@ export default function AddEditModal({ visible, supplement, onClose }: Props) {
           </TouchableOpacity>
         </View>
 
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView 
+          contentContainerStyle={[
+            styles.content, 
+            { paddingBottom: Math.max(insets.bottom, 60) }
+          ]}
+        >
           {/* Name */}
           <Text style={styles.fieldLabel}>NAME</Text>
           <TextInput
